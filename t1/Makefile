@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Werror
+CFLAGS = -Wall -Werror -g
 LDLIBS = -lcurses
 
 OBJS = exec.o cpu_estado.o es.o mem.o rel.o term.o instr.o err.o \

@@ -40,6 +40,7 @@ void exec_altera_estado(exec_t *self, cpu_estado_t *estado)
 }
 
 
+
 // ---------------------------------------------------------------------
 // funções auxiliares para usar durante a execução das instruções
 // alteram o estado da CPU caso ocorra erro

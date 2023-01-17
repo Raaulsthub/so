@@ -46,7 +46,7 @@ void init_proc(so_t* self) {
   cpu_estado_t* cpu = cpue_cria();
   int id = self->proc_count;
   self->proc_count++;
-  int estado = PRONTO;
+  int estado = EM_EXECUCAO;
 
   // salvando na tabela
   self->tabela->processes[0] = (proc_t*)malloc(sizeof(proc_t));
@@ -163,21 +163,46 @@ static void so_trata_sisop_escr(so_t *self)
   exec_altera_estado(contr_exec(self->contr), self->cpue);
 }
 
-// chamada de sistema para término do processo
-static void so_trata_sisop_fim(so_t *self)
-{
-  for(int i = 0; i < PROGRAMAS; i++) {
-    if(self->tabela->processes[i]->estado == EM_EXECUCAO) {
-      cpue_destroi(self->tabela->processes[i]->cpue);
-      mem_destroi(self->tabela->processes[i]->mem);
-      self->tabela->processes[i]->estado = FINALIZADO;
+void bota_proc(so_t* self) {
+  int idx;
+  for (idx = 0; idx < PROGRAMAS; idx++) {
+    if(self->tabela->processes[idx] != NULL && self->tabela->processes[idx]->estado == PRONTO) {
       break;
     }
   }
-  // AQUI AQUI AQUI AQUI FALTA BOTAR O PROCESSO DEVOLTA
+  t_printf("PROGRAMA %d PODE SER EXECUTADO!", idx);
 
-  t_printf("SISOP FIM não implementado");
-  panico(self);
+  cpue_copia(self->tabela->processes[idx]->cpue, self->cpue);
+  
+  mem_t *mem = contr_mem(self->contr);
+  for (int i = 0; i < mem_tam(self->tabela->processes[idx]->mem); i++) {
+    int val;
+    mem_le(self->tabela->processes[idx]->mem, i, &val);
+    mem_escreve(mem, i, val);
+  }
+  self->tabela->processes[idx]->estado = EM_EXECUCAO;
+}
+
+// chamada de sistema para término do processo
+static void so_trata_sisop_fim(so_t *self)
+{
+  int id;
+  for(int i = 0; i < PROGRAMAS; i++) {
+    if(self->tabela->processes[i] != NULL && self->tabela->processes[i]->estado == EM_EXECUCAO) {
+      self->tabela->processes[i]->estado = FINALIZADO;
+      id = i;
+      break;
+    }
+  }
+  bota_proc(self);
+
+  // interrupção da cpu foi atendida
+  cpue_muda_erro(self->cpue, ERR_OK, 0);
+   // incrementa o PC
+  exec_altera_estado(contr_exec(self->contr), self->cpue);
+  
+
+  t_printf("PROCESSO %d FINALIZADO", id);
 }
 
 
@@ -202,6 +227,15 @@ static void so_trata_sisop_cria(so_t *self)
   self->tabela->processes[id]->estado = estado;
   self->tabela->processes[id]->cpue = cpu;
   self->tabela->processes[id]->mem = mem;
+
+  // interrupção da cpu foi atendida
+  cpue_muda_erro(self->cpue, ERR_OK, 0);
+   // incrementa o PC
+  cpue_muda_PC(self->cpue, cpue_PC(self->cpue)+2);
+  // altera o estado da CPU (deveria alterar o estado do processo)
+  exec_altera_estado(contr_exec(self->contr), self->cpue);
+
+  t_printf("PROCESSO %d CRIADO", id);
 }
 
 // trata uma interrupção de chamada de sistema
@@ -224,7 +258,7 @@ static void so_trata_sisop(so_t *self)
       so_trata_sisop_cria(self);
       break;
     default:
-      t_printf("so: chamada de sistema não reconhecida %d\n", chamada);
+      t_printf("so: chamada de sistema nao reconhecida %d\n", chamada);
       panico(self);
   }
 }
@@ -246,7 +280,7 @@ void so_int(so_t *self, err_t err)
       so_trata_tic(self);
       break;
     default:
-      t_printf("SO: interrupção não tratada [%s]", err_nome(err));
+      t_printf("SO: interrupção nao tratada [%s]", err_nome(err));
       self->paniquei = true;
   }
 }
@@ -265,7 +299,7 @@ static void init_mem(so_t *self)
   mem_t *mem = contr_mem(self->contr);
   for (int i = 0; i < self->programs[0]->size; i++) {
     if (mem_escreve(mem, i, self->programs[0]->code[i]) != ERR_OK) {
-      t_printf("so.init_mem: erro de memória, endereco %d\n", i);
+      t_printf("so.init_mem: erro de memoria, endereco %d\n", i);
       panico(self);
     }
   }
@@ -273,6 +307,6 @@ static void init_mem(so_t *self)
   
 static void panico(so_t *self) 
 {
-  t_printf("Problema irrecuperável no SO");
+  t_printf("Problema irrecuperavel no SO");
   self->paniquei = true;
 }
