@@ -10,6 +10,7 @@
 #define PRONTO 0
 #define EM_EXECUCAO 1
 #define FINALIZADO 2
+#define BLOCKEADO_LEITURA 3
 
 typedef struct so_t so_t;
 typedef struct tabela_proc tab_t;

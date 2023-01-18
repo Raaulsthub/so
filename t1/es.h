@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include "err.h"
 
+
 typedef struct es_t es_t; // declara o tipo como sendo uma estrutura opaca
 
 // tipos de acesso que se pode fazer a um dispositivo
