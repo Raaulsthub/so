@@ -21,6 +21,7 @@ struct so_t {
   tab_t* tabela;
   prog_t** programs;
   int proc_count;
+  int curr_prog;
 };
 
 struct process_info {
@@ -73,6 +74,7 @@ so_t *so_cria(contr_t *contr)
   self->paniquei = false;
   self->cpue = cpue_cria();
   self->proc_count = 0;
+  self->curr_prog = 0;
   // coloca a CPU em modo usuário
   /*
   exec_copia_estado(contr_exec(self->contr), self->cpue);
@@ -82,7 +84,6 @@ so_t *so_cria(contr_t *contr)
 
   self->tabela = (tab_t*) malloc (sizeof(tab_t));
   self->tabela->processes = (proc_t**) malloc (sizeof(proc_t*) * PROGRAMAS);
-
   self->programs = (prog_t**) malloc (sizeof(prog_t*) * PROGRAMAS);
 
   int progr0[] = {
@@ -136,22 +137,12 @@ static void so_trata_sisop_le(so_t *self)
 
   cpue_muda_erro(self->cpue, ERR_OK, 0);
 
-  int none = 0;
   if (err != ERR_OK) {
-    int idx = 0;
-    none = 1;
-    for (idx = 0; idx < PROGRAMAS; idx++) {
-      if (self->tabela->processes[idx] != NULL && self->tabela->processes[idx]->estado == EM_EXECUCAO) {
-        none = 0;
-        break;
-      }
-    }
-    
-    if (none == 0) {
-      self->tabela->processes[idx]->acesso = leitura;
-      self->tabela->processes[idx]->disp = disp;
-      cpue_muda_erro(self->cpue, err, 0);
-    }
+    int idx = self->curr_prog;
+    self->tabela->processes[idx]->acesso = leitura;
+    self->tabela->processes[idx]->disp = disp;
+    cpue_muda_erro(self->cpue, err, 0);
+
   } else{
     cpue_muda_X(self->cpue, val);
   }
@@ -170,21 +161,12 @@ static void so_trata_sisop_escr(so_t *self)
 
   cpue_muda_erro(self->cpue, ERR_OK, 0);
 
-  int none = 0;
   if (err != ERR_OK) {
-    int idx = 0;
-    none = 1;
-    for (idx = 0; idx < PROGRAMAS; idx++) {
-      if (self->tabela->processes[idx] != NULL && self->tabela->processes[idx]->estado == EM_EXECUCAO) {
-        none = 0;
-        break;
-      }
-    }
-    if (none == 0) {
-      self->tabela->processes[idx]->disp = disp;
-      self->tabela->processes[idx]->acesso = escrita;
-      cpue_muda_erro(self->cpue, err, 0);
-    }
+    int idx = self->curr_prog;
+    self->tabela->processes[idx]->disp = disp;
+    self->tabela->processes[idx]->acesso = escrita;
+    cpue_muda_erro(self->cpue, err, 0);
+  
   }
 
   cpue_muda_A(self->cpue, err);
@@ -204,27 +186,24 @@ int esc_seleciona_processo(so_t* self) {
 }
 
 void so_atualiza_tab(so_t* self, int motivo) {
-  int idx_current = 0;
-  for (idx_current = 0; idx_current < PROGRAMAS; idx_current++) {
-    if(self->tabela->processes[idx_current] != NULL && self->tabela->processes[idx_current]->estado == EM_EXECUCAO){
-      cpue_copia(self->cpue, self->tabela->processes[idx_current]->cpue);
-      mem_t* mem_atual = contr_mem(self->contr);
-      for (int i = 0; i < MEM_TAM; i++) {
-        int valor;
-        mem_le(mem_atual, i, &valor);
-        mem_escreve(self->tabela->processes[idx_current]->mem, i, valor);
-      }
-      self->tabela->processes[idx_current]->estado = motivo;
-    }
+  int idx_current = self->curr_prog;
+  cpue_copia(self->cpue, self->tabela->processes[idx_current]->cpue);
+  mem_t* mem_atual = contr_mem(self->contr);
+  for (int i = 0; i < MEM_TAM; i++) {
+    int valor;
+    mem_le(mem_atual, i, &valor);
+    mem_escreve(self->tabela->processes[idx_current]->mem, i, valor);
   }
+  self->tabela->processes[idx_current]->estado = motivo;
 }
 
 void so_bota_proc(so_t* self) {
   int idx = esc_seleciona_processo(self);
 
   if (idx != -1) {
-    t_printf("PROGRAMA %d PODE SER EXECUTADO!", idx);
-
+    t_printf("PROGRAMA %d SENDO EXECUTADO!", idx);
+    self->tabela->processes[idx]->estado = EM_EXECUCAO;
+    self->curr_prog = idx;
     cpue_copia(self->tabela->processes[idx]->cpue, self->cpue);
     
     mem_t *mem = contr_mem(self->contr);
@@ -233,14 +212,14 @@ void so_bota_proc(so_t* self) {
       mem_le(self->tabela->processes[idx]->mem, i, &val);
       mem_escreve(mem, i, val);
     }
-    self->tabela->processes[idx]->estado = EM_EXECUCAO;
     cpue_muda_modo(self->cpue, usuario);
   }
   else {
     // botar cpu em zumbi
-    t_printf("NENHUM PROGRAMA DISPONIVEL! CPU EM MODO ZUMBI!!!");
+    self->curr_prog = -1;
     cpue_muda_modo(self->cpue, zumbi);
   }
+  cpue_muda_erro(self->cpue, ERR_OK, 0);
   exec_altera_estado(contr_exec(self->contr), self->cpue);
 }
 
@@ -249,13 +228,10 @@ void so_bota_proc(so_t* self) {
 static void so_trata_sisop_fim(so_t *self)
 {
   int id;
-  for(int i = 0; i < PROGRAMAS; i++) {
-    if(self->tabela->processes[i] != NULL && self->tabela->processes[i]->estado == EM_EXECUCAO) {
-      self->tabela->processes[i]->estado = FINALIZADO;
-      id = i;
-      break;
-    }
-  }
+  int i = self->curr_prog;
+  self->tabela->processes[i]->estado = FINALIZADO;
+  id = self->tabela->processes[i]->id;
+  t_printf("PROCESSO %d FINALIZADO", id);
   so_bota_proc(self);
 
   // interrupção da cpu foi atendida
@@ -263,8 +239,6 @@ static void so_trata_sisop_fim(so_t *self)
    // incrementa o PC
   exec_altera_estado(contr_exec(self->contr), self->cpue);
   
-
-  t_printf("PROCESSO %d FINALIZADO", id);
 }
 
 
@@ -345,15 +319,14 @@ static void so_trata_tic(so_t *self)
       }
     }
   }
+  if (self->curr_prog == -1) {
+    so_bota_proc(self);
+    cpue_muda_erro(self->cpue, ERR_OK, 0);
+    exec_altera_estado(contr_exec(self->contr), self->cpue);
+  }
 }
 
 void so_trata_disp(so_t* self) {
-  int idx = 0;
-  for (idx = 0; idx < PROGRAMAS; idx++) {
-    if (self->tabela->processes[idx] != NULL && self->tabela->processes[idx]->estado == EM_EXECUCAO) {
-      break;
-    }
-  }
   so_atualiza_tab(self, BLOCKEADO);
   so_bota_proc(self);
   cpue_muda_erro(self->cpue, ERR_OK, 0);
