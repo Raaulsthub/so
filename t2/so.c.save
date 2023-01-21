@@ -1,13 +1,12 @@
-#include "so.h"
+include "so.h"
 #include "tela.h"
 #include <stdlib.h>
 #include <stdio.h>
-#include <time.h>
 
 // quantos programas no so
 #define PROGRAMAS 5
 // quantum
-#define QUANTUM 12
+#define QUANTUM 3
 // round robin
 #define ROUND 0
 
@@ -39,9 +38,6 @@ struct so_t {
   int proc_count;
   int curr_prog;
   esc_t* esc;
-
-  // metricas t2
-  clock_t begin;
 };
 
 // infos de processo guardadas na tabela
@@ -80,18 +76,13 @@ so_t *so_cria(contr_t *contr)
   self->cpue = cpue_cria();
   self->proc_count = 0;
   self->curr_prog = 0;
-
-
-  // METRICAS T2
-  self->begin = clock();
-
   
   // ROUND ROBIN E PROCESSO MAIS CURTO
   self->esc = (esc_t*) malloc (sizeof(esc_t));
   for (int i = 0; i < PROGRAMAS; i++) {
     self->esc->ready[i] = -1;
-    self->esc->average_time[i] = 0;
-    self->esc->last_time[i] = 0;
+    self->esc->average_time[i] = QUANTUM;
+    self->esc->last_time[i] = QUANTUM;
   }
   self->esc->curr_progr_time = 0;
 
@@ -210,7 +201,6 @@ static void so_trata_sisop_escr(so_t *self)
 }
 
 void so_bota_proc(so_t* self) {
-  self->esc->curr_progr_time = 0;
   int idx = esc_seleciona_processo(self);
   if (idx != -1) {
     self->tabela->processes[idx]->estado = EM_EXECUCAO;
@@ -365,9 +355,7 @@ static void so_trata_tic(so_t *self)
   }
 
   if (tem_proc == 0) {
-    double time_so = (double) (clock() - self->begin) / CLOCKS_PER_SEC;
     t_printf("FIM DA EXECUCAO DOS PROGRAMAS!");
-    t_printf("TEMPO DE EXECUCAO TOTAL DO SO: %lf segundos", time_so);
     self->paniquei = true;
   }
 
@@ -398,7 +386,6 @@ void so_trata_quantum(so_t* self) {
     self->esc->quantum[self->curr_prog] = QUANTUM; // refill
   }
   else {
-    self->esc->quantum[self->curr_prog] = QUANTUM; // refill
     // primeira vez que o processo esta executando
     self->esc->average_time[self->curr_prog] = (self->esc->curr_progr_time + self->esc->last_time[self->curr_prog]) / 2;
     self->esc->last_time[self->curr_prog] = self->esc->curr_progr_time;
@@ -426,7 +413,7 @@ void so_int(so_t *self, err_t err)
       so_trata_quantum(self);
       break;
     default:
-      t_printf("SO: interrupcao nao tratada [%s]", err_nome(err));
+      t_printf("SO: interrupção nao tratada [%s]", err_nome(err));
       self->paniquei = true;
   }
 }

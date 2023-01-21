@@ -12,6 +12,7 @@ typedef enum {
   ERR_INSTR_INV,     // instrução inválida
   ERR_TIC,           // interrupção do relógio
   ERR_SISOP,         // chamada de sistema
+  ERR_QUANTUM,       // quantum acabou
   N_ERR              // número de erros
 } err_t;
 // retorna o nome de erro

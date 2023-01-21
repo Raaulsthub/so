@@ -1,12 +1,7 @@
 #ifndef SO_H
 #define SO_H
 
-// SO
-// Simula o sistema operacional
-// É chamado na inicialização (quando deve colocar um programa na memória), e
-//   depois só quando houver interrupção
-//
-// Por enquanto não faz quase nada
+
 #define PRONTO 0
 #define EM_EXECUCAO 1
 #define FINALIZADO 2
