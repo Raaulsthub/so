@@ -7,7 +7,7 @@
 // quantos programas no so
 #define PROGRAMAS 5
 // quantum
-#define QUANTUM 12
+#define QUANTUM 30
 // round robin
 #define ROUND 0
 
@@ -49,8 +49,11 @@ struct so_t {
   // metricas por processo - AINDA NAO FEITO
   clock_t proc_begin[PROGRAMAS];
   clock_t proc_end[PROGRAMAS];
+  clock_t proc_block_begin[PROGRAMAS];
+  clock_t proc_exec_begin[PROGRAMAS];
   double proc_blockeado[PROGRAMAS];
   double proc_pronto[PROGRAMAS];
+  double proc_exec[PROGRAMAS];
   long bloqueios[PROGRAMAS];
   long preempcoes[PROGRAMAS];
   double resp_media[PROGRAMAS];
@@ -101,6 +104,7 @@ so_t *so_cria(contr_t *contr)
     self->bloqueios[i] = 0;
     self->preempcoes[i] = 0;
     self->resp_media[i] = 0;
+    self->proc_exec[i] = 0;
   }
 
 
@@ -242,6 +246,7 @@ void so_bota_proc(so_t* self) {
   }
 
   if (idx != -1) {
+    self->proc_exec_begin[idx] = clock();
     self->tabela->processes[idx]->estado = EM_EXECUCAO;
     self->curr_prog = idx;
     cpue_copia(self->tabela->processes[idx]->cpue, self->cpue);
@@ -261,9 +266,11 @@ void so_bota_proc(so_t* self) {
 
   }
   else {
+    if (self->curr_prog != -1) {
+      self->begin_zumbi = clock();
+    }
     // botar cpu em zumbi
     self->curr_prog = -1;
-    self->begin_zumbi = clock();
     cpue_muda_modo(self->cpue, zumbi);
   }
   cpue_muda_erro(self->cpue, ERR_OK, 0);
@@ -377,7 +384,7 @@ static void so_trata_tic(so_t *self)
       acesso_t forma = self->tabela->processes[i]->acesso;
       if(es_pronto(contr_es(self->contr), disp, forma)) {
         self->tabela->processes[i]->estado = PRONTO;
-
+        self->proc_blockeado[i] += (double) (clock() - self->proc_block_begin[i]) / CLOCKS_PER_SEC;
         // ROUND ROBIN
         self->esc->quantum[i] = QUANTUM;
         esc_adiciona_pronto(self, i);
@@ -406,11 +413,21 @@ static void so_trata_tic(so_t *self)
   if (tem_proc == 0) {
     t_printf("Fim da execucao dos programas!");
     t_printf("Tempo total do so: %lfs\t\tTempo de uso da cpu: %lfs",
-      (double) (clock() - self->begin) / CLOCKS_PER_SEC, (double) (clock() - self->begin) / CLOCKS_PER_SEC - self->cpu_parada);
-    t_printf("Processo\tTempo de retorno\tBloqueios\tPreempcoes");
+      (double) (clock() - self->begin) / CLOCKS_PER_SEC, (double) ((clock() - self->begin) / CLOCKS_PER_SEC) - self->cpu_parada);
+    t_printf("P\tt\t\tblocks  preemp    \tB\t\tE\t\tP");
     for (int i = 0; i <  PROGRAMAS; i++) {
       if(self->tabela->processes[i] != NULL && self->tabela->processes[i]->estado == FINALIZADO) {
-        t_printf("%d\t\t%lfs\t\t%ld\t\t%ld", i, (double)(self->proc_end[i] - self->proc_begin[i]) / CLOCKS_PER_SEC, self->bloqueios[i], self->preempcoes[i]);
+        double temp_exec;
+        double temp_p;
+        if(i == 0) {
+          temp_exec = (double)(self->proc_end[i] - self->proc_begin[i]) / CLOCKS_PER_SEC;
+          temp_p = 0;
+        } else {
+          temp_exec = self->proc_exec[i];
+          temp_p = ((double)(self->proc_end[i] - self->proc_begin[i]) / CLOCKS_PER_SEC) - self->proc_exec[i] - self->proc_blockeado[i]; // PRINTAR
+        }
+        t_printf("%d\t%lfs\t%ld\t%ld\t\t%lfs\t%lfs\t%lfs\t%lfs", i,
+          (double)(self->proc_end[i] - self->proc_begin[i]) / CLOCKS_PER_SEC, self->bloqueios[i], self->preempcoes[i], self->proc_blockeado[i], temp_exec, temp_p);
       }
     }
 
@@ -433,6 +450,7 @@ void so_trata_disp(so_t* self) {
     self->esc->last_time[self->curr_prog] = self->esc->curr_progr_time;
   }
   so_atualiza_tab(self, BLOCKEADO);
+  self->proc_block_begin[self->curr_prog] = clock();
   self->bloqueios[self->curr_prog]++;
   so_bota_proc(self);
   cpue_muda_erro(self->cpue, ERR_OK, 0);
@@ -453,6 +471,7 @@ void so_trata_quantum(so_t* self) {
   }
   esc_adiciona_pronto(self, self->curr_prog); // vai pro fim da fila
   so_atualiza_tab(self, PRONTO);
+  self->proc_exec[self->curr_prog] += (double) (clock() - self->proc_exec_begin[self->curr_prog]) / CLOCKS_PER_SEC;
   so_bota_proc(self);
   cpue_muda_erro(self->cpue, ERR_OK, 0);
   exec_altera_estado(contr_exec(self->contr), self->cpue);
