@@ -94,8 +94,7 @@ void contr_laco(contr_t *self)
     t_atualiza();
   } while (so_ok(self->so));
       
-  t_printf("Fim da execução.");
-  t_printf("relógio: %d\n", rel_agora(self->rel));
+  t_printf("Fim da execucao\tRelogio: %d", rel_agora(self->rel));
 }
  
 

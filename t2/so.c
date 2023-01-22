@@ -40,8 +40,22 @@ struct so_t {
   int curr_prog;
   esc_t* esc;
 
-  // metricas t2
-  clock_t begin;
+  // metricas gerais t2
+  clock_t begin; // comeco so
+  double cpu_parada; // tempo que a cpu ficou em modo zumbi
+  long interrupcoes; // numero de interrupcoes tratadas
+  clock_t begin_zumbi; // marca o tempo assim que a cpu entra em modo zumbi
+
+  // metricas por processo - AINDA NAO FEITO
+  clock_t proc_begin[PROGRAMAS];
+  clock_t proc_end[PROGRAMAS];
+  double proc_blockeado[PROGRAMAS];
+  double proc_pronto[PROGRAMAS];
+  long bloqueios[PROGRAMAS];
+  long preempcoes[PROGRAMAS];
+  double resp_media[PROGRAMAS];
+  
+
 };
 
 // infos de processo guardadas na tabela
@@ -80,6 +94,14 @@ so_t *so_cria(contr_t *contr)
   self->cpue = cpue_cria();
   self->proc_count = 0;
   self->curr_prog = 0;
+
+  for (int i = 0; i < PROGRAMAS; i++) {
+    self->proc_blockeado[i] = 0;
+    self->proc_pronto[i] = 0;
+    self->bloqueios[i] = 0;
+    self->preempcoes[i] = 0;
+    self->resp_media[i] = 0;
+  }
 
 
   // METRICAS T2
@@ -167,6 +189,7 @@ void init_proc(so_t* self) {
 // sisop le
 static void so_trata_sisop_le(so_t *self)
 {
+  self->interrupcoes++;
   int disp = cpue_A(self->cpue);
   int val;
   err_t err = es_le(contr_es(self->contr), disp, &val);
@@ -190,6 +213,7 @@ static void so_trata_sisop_le(so_t *self)
 // sisop escreve
 static void so_trata_sisop_escr(so_t *self)
 {
+  self->interrupcoes++;
   int disp = cpue_A(self->cpue);
   int val = cpue_X(self->cpue);
   err_t err = es_escreve(contr_es(self->contr), disp, val);
@@ -212,6 +236,11 @@ static void so_trata_sisop_escr(so_t *self)
 void so_bota_proc(so_t* self) {
   self->esc->curr_progr_time = 0;
   int idx = esc_seleciona_processo(self);
+
+  if (self->curr_prog == -1 && idx != -1) {
+    self->cpu_parada += (double) (clock() - self->begin_zumbi) / CLOCKS_PER_SEC;
+  }
+
   if (idx != -1) {
     self->tabela->processes[idx]->estado = EM_EXECUCAO;
     self->curr_prog = idx;
@@ -234,6 +263,7 @@ void so_bota_proc(so_t* self) {
   else {
     // botar cpu em zumbi
     self->curr_prog = -1;
+    self->begin_zumbi = clock();
     cpue_muda_modo(self->cpue, zumbi);
   }
   cpue_muda_erro(self->cpue, ERR_OK, 0);
@@ -244,13 +274,17 @@ void so_bota_proc(so_t* self) {
 // chamada de sistema para término do processo
 static void so_trata_sisop_fim(so_t *self)
 {
+  self->interrupcoes++;
   int id;
   int i = self->curr_prog;
   self->tabela->processes[i]->estado = FINALIZADO;
+
+  // metricas
+  self->proc_end[i] = clock();
+
   id = self->tabela->processes[i]->id;
   t_printf("PROCESSO %d FINALIZADO", id);
   so_bota_proc(self);
-
   // interrupção da cpu foi atendida
   cpue_muda_erro(self->cpue, ERR_OK, 0);
    // incrementa o PC
@@ -262,6 +296,7 @@ static void so_trata_sisop_fim(so_t *self)
 // chamada de sistema para criação de processo
 static void so_trata_sisop_cria(so_t *self)
 {
+  self->interrupcoes++;
   int prog_number = cpue_A(self->cpue);   
   // inicializando memoria com o programa
   mem_t* mem = mem_cria(MEM_TAM);
@@ -289,6 +324,9 @@ static void so_trata_sisop_cria(so_t *self)
   esc_adiciona_pronto(self, id);
   self->esc->quantum[id] = QUANTUM;
 
+  // metricas
+  self->proc_begin[id] = clock();
+
   t_printf("PROCESSO %d CRIADO", id);
 }
 
@@ -309,7 +347,7 @@ static void so_trata_sisop(so_t *self)
     case SO_CRIA:
       so_trata_sisop_cria(self);
       break;
-    default:
+    default:  
       t_printf("so: chamada de sistema nao reconhecida %d\n", chamada);
       panico(self);
       break;
@@ -326,6 +364,7 @@ static void so_trata_tic(so_t *self)
     }
     // preempcao
     if (self->esc->quantum[self->curr_prog] == 0) {
+      self->preempcoes[self->curr_prog]++;
       cpue_muda_modo(self->cpue, supervisor);
       cpue_muda_erro(self->cpue, ERR_QUANTUM, 0);
       exec_altera_estado(contr_exec(self->contr), self->cpue);
@@ -365,9 +404,16 @@ static void so_trata_tic(so_t *self)
   }
 
   if (tem_proc == 0) {
-    double time_so = (double) (clock() - self->begin) / CLOCKS_PER_SEC;
-    t_printf("FIM DA EXECUCAO DOS PROGRAMAS!");
-    t_printf("TEMPO DE EXECUCAO TOTAL DO SO: %lf segundos", time_so);
+    t_printf("Fim da execucao dos programas!");
+    t_printf("Tempo total do so: %lfs\t\tTempo de uso da cpu: %lfs",
+      (double) (clock() - self->begin) / CLOCKS_PER_SEC, (double) (clock() - self->begin) / CLOCKS_PER_SEC - self->cpu_parada);
+    t_printf("Processo\tTempo de retorno\tBloqueios\tPreempcoes");
+    for (int i = 0; i <  PROGRAMAS; i++) {
+      if(self->tabela->processes[i] != NULL && self->tabela->processes[i]->estado == FINALIZADO) {
+        t_printf("%d\t\t%lfs\t\t%ld\t\t%ld", i, (double)(self->proc_end[i] - self->proc_begin[i]) / CLOCKS_PER_SEC, self->bloqueios[i], self->preempcoes[i]);
+      }
+    }
+
     self->paniquei = true;
   }
 
@@ -387,12 +433,14 @@ void so_trata_disp(so_t* self) {
     self->esc->last_time[self->curr_prog] = self->esc->curr_progr_time;
   }
   so_atualiza_tab(self, BLOCKEADO);
+  self->bloqueios[self->curr_prog]++;
   so_bota_proc(self);
   cpue_muda_erro(self->cpue, ERR_OK, 0);
   exec_altera_estado(contr_exec(self->contr), self->cpue);
 }
 
 void so_trata_quantum(so_t* self) {
+  self->interrupcoes++;
   // quantum acabou
   if (ROUND == 1) {
     self->esc->quantum[self->curr_prog] = QUANTUM; // refill
