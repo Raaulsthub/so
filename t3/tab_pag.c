@@ -1,6 +1,8 @@
 #include "tab_pag.h"
 #include <stdlib.h>
 #include <stdbool.h>
+#include "so.h"
+
 
 typedef struct {
   bool valida;    // esta entrada é válida
@@ -28,6 +30,17 @@ tab_pag_t *tab_pag_cria(int num_pag, int tam_pag)
       free(self);
       return NULL;
     }
+  }
+  return self;
+}
+
+tab_pag_t* tab_pag_inicializa (int curr_quadro, int num_pag, int tam_pag) {
+  tab_pag_t* self = tab_pag_cria(num_pag, tam_pag);
+  for (int i = 0; i < num_pag; i++) {
+    self->tab[i].acessada = false;
+    self->tab[i].alterada = false;
+    self->tab[i].valida = true;
+    self->tab[i].quadro = curr_quadro + i;
   }
   return self;
 }

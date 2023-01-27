@@ -568,7 +568,7 @@ void esc_retira_pronto(so_t* self) {
 
 void so_atualiza_tab(so_t* self, int motivo) {
   int idx_current = self->curr_prog;
-  cpue_copia(self->cpue, self->tabela->processes[idx_current]->cpue);
+  exec_copia_estado(contr_exec(self->contr), self->tabela->processes[idx_current]->cpue);
   mem_t* mem_atual = contr_mem(self->contr);
   for (int i = 0; i < MEM_TAM; i++) {
     int valor;

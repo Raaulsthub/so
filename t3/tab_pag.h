@@ -15,6 +15,7 @@ typedef struct tab_pag_t tab_pag_t;
 //   de tamanho 'tam_pag' cada
 // retorna NULL em caso de erro
 tab_pag_t *tab_pag_cria(int num_pag, int tam_pag);
+tab_pag_t* tab_pag_inicializa (int curr_quadro, int num_pag, int tam_pag) ;
 
 // destrói um tabela de páginas
 // nenhuma outra operação pode ser realizada na tabela após esta chamada

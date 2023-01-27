@@ -3,13 +3,15 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdio.h>
 
 // quantos programas no so
 #define PROGRAMAS 5
 // quantum
-#define QUANTUM 30
+#define QUANTUM 200
 // round robin
 #define ROUND 0
+
 
 
 // STRUCTS
@@ -19,7 +21,7 @@ typedef struct escalonador_t{
   int ready[PROGRAMAS]; // fifo vai ser implementada com um vetor
   int average_time[PROGRAMAS];
   int last_time[PROGRAMAS];
-  int quantum[PROGRAMAS]; 
+  int quantum[PROGRAMAS];
   int curr_progr_time;
 }esc_t;
 
@@ -39,12 +41,14 @@ struct so_t {
   int proc_count;
   int curr_prog;
   esc_t* esc;
+  FILE* file;
+
+  int curr_quadro;
 
   // metricas gerais t2
   long ciclos_totais;
   long ciclos_zumbi;
   long interrupcoes_totais;
-
   // metricas por processo t2
   long retorno[PROGRAMAS];
   long bloqueado[PROGRAMAS];
@@ -58,8 +62,7 @@ struct so_t {
 };
 
 // infos de processo guardadas na tabela
-struct process_info {
-  mem_t* mem;
+struct process_info { 
   cpu_estado_t* cpue;
   int id;
   int estado;
@@ -76,7 +79,7 @@ struct tabela_proc {
 
 // funcoes
 void so_atualiza_tab(so_t* self, int motivo);
-static void init_mem(so_t *self);
+//static void init_mem(so_t *self);
 static void panico(so_t *self);
 void init_proc(so_t* self);
 int esc_seleciona_processo(so_t* self);
@@ -94,7 +97,8 @@ so_t *so_cria(contr_t *contr)
   self->cpue = cpue_cria();
   self->proc_count = 0;
   self->curr_prog = 0;
-
+  self->curr_quadro = 0;
+  self->file = fopen("saida.txt", "w");
 
   // metricas
   for (int i = 0; i < PROGRAMAS; i++) {
@@ -147,10 +151,18 @@ so_t *so_cria(contr_t *contr)
   for (int i = 0; i < self->programs[2]->size; i++) {
     self->programs[2]->code[i] = progr2[i];
   }
+  int progr3[] = {
+    #include "a1.maq"
+  };
+  self->programs[3] = (prog_t*) malloc (sizeof(prog_t));
+  self->programs[3]->size = sizeof(progr3)/sizeof(int);
+  self->programs[3]->code = (int*) malloc (sizeof(int) * self->programs[3]->size);
+  for (int i = 0; i < self->programs[3]->size; i++) {
+    self->programs[3]->code[i] = progr3[i];
+  }
 
 
   init_proc(self);
-  init_mem(self);
   return self;
 }
 
@@ -164,27 +176,38 @@ void so_destroi(so_t *self)
 void init_proc(so_t* self) {
   int id = self->proc_count;
   self->proc_count++;
-  // tabela de pag
-  
-  
 
-  // iniciando memoria
-  mem_t* mem = mem_cria(MEM_TAM);
-  for (int i = 0; i < self->programs[0]->size; i++) {
-    mem_escreve(mem, i, self->programs[0]->code[i]);
-  }
   // inicializando cpue
   cpu_estado_t* cpu = cpue_cria();
   int estado = EM_EXECUCAO;
 
-  // salvando na tabela infos do processo init
+  //salvando na tabela infos do processo init
   self->tabela->processes[0] = (proc_t*)malloc(sizeof(proc_t));
   self->tabela->processes[0]->id = id;
   self->tabela->processes[0]->estado = estado;
   self->tabela->processes[0]->cpue = cpu;
-  self->tabela->processes[0]->mem = mem;
-}
 
+  // tabela de pag
+  int quadros = (self->programs[0]->size / TAM_QUADRO);
+  if (self->programs[0]->size % TAM_QUADRO != 0) quadros++;
+  t_printf(" QUADROS %d", quadros);
+  self->tabela->processes[id]->tabela_paginas = tab_pag_inicializa(self->curr_quadro, quadros, TAM_QUADRO);
+  self->curr_quadro += quadros;
+
+  // memoria
+  mmu_usa_tab_pag(contr_mmu(self->contr), self->tabela->processes[0]->tabela_paginas);
+  for (int i = 0; i < self->programs[0]->size; i++) {
+    mmu_escreve(contr_mmu(self->contr), i, self->programs[0]->code[i]);
+  }
+
+  for(int i = 0; i < MEM_TAM; i++) {
+    int a;
+    mem_le(contr_mem(self->contr), i, &a);
+    fprintf(self->file, "%d ", a);
+  }
+  fprintf(self->file, "\n");
+
+}
 
 // sisop le
 static void so_trata_sisop_le(so_t *self)
@@ -240,13 +263,7 @@ void so_bota_proc(so_t* self) {
     self->tabela->processes[idx]->estado = EM_EXECUCAO;
     self->curr_prog = idx;
     cpue_copia(self->tabela->processes[idx]->cpue, self->cpue);
-    
-    mem_t *mem = contr_mem(self->contr);
-    for (int i = 0; i < mem_tam(self->tabela->processes[idx]->mem); i++) {
-      int val;
-      mem_le(self->tabela->processes[idx]->mem, i, &val);
-      mem_escreve(mem, i, val);
-    }
+    mmu_usa_tab_pag(contr_mmu(self->contr), self->tabela->processes[idx]->tabela_paginas);
     cpue_muda_modo(self->cpue, usuario);
 
     // ROUND ROBIN
@@ -287,12 +304,7 @@ static void so_trata_sisop_fim(so_t *self)
 // chamada de sistema para criação de processo
 static void so_trata_sisop_cria(so_t *self)
 {
-  int prog_number = cpue_A(self->cpue);   
-  // inicializando memoria com o programa
-  mem_t* mem = mem_cria(MEM_TAM);
-  for (int i = 0; i < self->programs[prog_number]->size; i++) {
-    mem_escreve(mem, i, self->programs[prog_number]->code[i]);
-  }
+  //int prog_number = cpue_A(self->cpue);
   // inicializando cpue
   cpu_estado_t* cpu = cpue_cria();
   int id = self->proc_count;
@@ -304,7 +316,20 @@ static void so_trata_sisop_cria(so_t *self)
   self->tabela->processes[id]->id = id;
   self->tabela->processes[id]->estado = estado;
   self->tabela->processes[id]->cpue = cpu;
-  self->tabela->processes[id]->mem = mem;
+
+  // tabela de pag
+  int quadros = (self->programs[id]->size / TAM_QUADRO);
+  if (self->programs[0]->size % TAM_QUADRO != 0) quadros++;
+  self->tabela->processes[id]->tabela_paginas = tab_pag_inicializa(self->curr_quadro, quadros, TAM_QUADRO);
+  self->curr_quadro += quadros;
+
+  // memoria
+  mmu_usa_tab_pag(contr_mmu(self->contr), self->tabela->processes[id]->tabela_paginas);
+  for (int i = 0; i < self->programs[id]->size; i++) {
+    mmu_escreve(contr_mmu(self->contr), i, self->programs[id]->code[i]);
+  }
+  // volta pro init
+  mmu_usa_tab_pag(contr_mmu(self->contr), self->tabela->processes[0]->tabela_paginas);
 
   cpue_muda_erro(self->cpue, ERR_OK, 0);
   cpue_muda_PC(self->cpue, cpue_PC(self->cpue)+2);
@@ -313,6 +338,14 @@ static void so_trata_sisop_cria(so_t *self)
   // ROUND ROBIN
   esc_adiciona_pronto(self, id);
   self->esc->quantum[id] = QUANTUM;
+
+  // debug memoria
+  for(int i = 0; i < MEM_TAM; i++) {
+    int a;
+    mem_le(contr_mem(self->contr), i, &a);
+    fprintf(self->file, "%d ", a);
+  }
+  fprintf(self->file, "\n");
 
 
   t_printf("PROCESSO %d CRIADO", id);
@@ -361,9 +394,6 @@ static void so_trata_tic(so_t *self)
     if (self->esc->quantum[self->curr_prog] == 0) {
       cpue_muda_modo(self->cpue, supervisor);
       cpue_muda_erro(self->cpue, ERR_QUANTUM, 0);
-      /*if(true) {
-        cpue_muda_PC(self->cpue, cpue_PC(self->cpue) + 2);
-      }*/
       exec_altera_estado(contr_exec(self->contr), self->cpue);
     }
   } 
@@ -509,16 +539,16 @@ bool so_ok(so_t *self)
 }
 
 
-static void init_mem(so_t *self)
-{
-  mem_t *mem = contr_mem(self->contr);
-  for (int i = 0; i < self->programs[0]->size; i++) {
-    if (mem_escreve(mem, i, self->programs[0]->code[i]) != ERR_OK) {
-      t_printf("so.init_mem: erro de memoria, endereco %d\n", i);
-      panico(self);
-    }
-  }
-}
+// static void init_mem(so_t *self)
+// {
+//   mem_t *mem = contr_mem(self->contr);
+//   for (int i = 0; i < self->programs[0]->size; i++) {
+//     if (mem_escreve(mem, i, self->programs[0]->code[i]) != ERR_OK) {
+//       t_printf("so.init_mem: erro de memoria, endereco %d\n", i);
+//       panico(self);
+//     }
+//   }
+// }
   
 static void panico(so_t *self) 
 {
@@ -573,12 +603,6 @@ void esc_retira_pronto(so_t* self) {
 
 void so_atualiza_tab(so_t* self, int motivo) {
   int idx_current = self->curr_prog;
-  cpue_copia(self->cpue, self->tabela->processes[idx_current]->cpue);
-  mem_t* mem_atual = contr_mem(self->contr);
-  for (int i = 0; i < MEM_TAM; i++) {
-    int valor;
-    mem_le(mem_atual, i, &valor);
-    mem_escreve(self->tabela->processes[idx_current]->mem, i, valor);
-  }
+  exec_copia_estado(contr_exec(self->contr), self->tabela->processes[idx_current]->cpue);
   self->tabela->processes[idx_current]->estado = motivo;
 }
